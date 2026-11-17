@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重复 Bug 查找工具</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --danger: #dc2626;
+    --warn: #ea580c;
+    --info: #2563eb;
+    --low: #64748b;
+    --ok: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type="text"], textarea, select {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    background: #fff;
+  }
+  textarea { resize: vertical; min-height: 90px; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid #bfdbfe; border-color: var(--primary); }
+  button {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: var(--primary-dark); }
+  button:disabled { background: #9ca3af; cursor: not-allowed; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .stat { font-size: 13px; color: var(--muted); }
+  .stat b { color: var(--text); }
+  .hint { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #1e40af; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: #f9fafb; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  a.key { color: var(--primary); text-decoration: none; font-weight: 600; }
+  a.key:hover { text-decoration: underline; }
+  .priority { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .p-critical { background: #fee2e2; color: #b91c1c; }
+  .p-major { background: #ffedd5; color: #c2410c; }
+  .p-normal { background: #dbeafe; color: #1d4ed8; }
+  .p-minor { background: #f1f5f9; color: #475569; }
+  .score { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>重复 Bug 查找工具</h1>
+  <p>上传 CSV Bug 表 → 输入问题描述 → 模糊搜索相似 Bug，关键字可点击跳转 Jira。</p>
+</header>
+<main>
+  <div class="card">
+    <h2>Jira 链接配置</h2>
+    <div class="grid-2">
+      <div>
+        <label for="jiraBase">Jira 基础地址（留空则关键字不生成链接）</label>
+        <input type="text" id="jiraBase" placeholder="例如：https://your-company.atlassian.net">
+      </div>
+      <div class="hint" style="margin-top:0;">
+        链接规则：<b>{Jira地址}/browse/{问题关键字}</b>，例如 /browse/P62LC-30669
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>步骤一：上传 Bug 单 CSV</h2>
+    <div class="row">
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="max-width:360px;">
+      <span class="stat" id="loadStat">尚未加载文件</span>
+    </div>
+    <div class="grid-2" style="margin-top:12px;">
+      <div>
+        <label for="colKey">关键字列</label>
+        <select id="colKey"></select>
+      </div>
+      <div>
+        <label for="colSummary">概要列</label>
+        <select id="colSummary"></select>
+      </div>
+      <div>
+        <label for="colPriority">优先级列</label>
+        <select id="colPriority"></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>步骤二：输入问题描述并分析</h2>
+    <label for="queryInput">问题简要描述</label>
+    <textarea id="queryInput" placeholder="例如：【P62-CN】【固件】【OTA3】睡眠数据少识别一小时"></textarea>
+    <div class="row" style="margin-top:12px;">
+      <button id="analyzeBtn">开始分析</button>
+      <label style="margin:0 0 0 8px; display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="number" id="threshold" value="0.15" min="0" max="1" step="0.05" style="width:80px;">
+        <span>匹配度阈值（0–1）</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>步骤三：匹配结果 <span class="stat" id="resultStat"></span></h2>
+    <div class="row" style="margin-bottom:10px;">
+      <button id="exportBtn" disabled>导出结果 CSV</button>
+      <button id="copyBtn" disabled>复制关键字列表</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="resultTable">
+        <thead>
+          <tr>
+            <th>问题关键字</th>
+            <th>概要</th>
+            <th>优先级</th>
+            <th>匹配度</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="4" class="empty">加载 CSV 并点击“开始分析”后，这里显示匹配结果。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ---------- CSV 解析（RFC 4180，支持引号内逗号/换行/转义） ----------
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else {
+      if (c === '"') {
+        inQuotes = true;
+      } else if (c === ',') {
+        row.push(field); field = "";
+      } else if (c === '\n') {
+        row.push(field); field = "";
+        rows.push(row); row = [];
+      } else if (c === '\r') {
+        // 忽略 \r（兼容 \r\n 与旧 Mac \r）
+      } else {
+        field += c;
+      }
+    }
+  }
+  if (field !== "" || row.length > 0) {
+    row.push(field); rows.push(row);
+  }
+  return rows.filter(r => r.some(x => (x || "").trim() !== ""));
+}
+
+// ---------- 文本相似度（中英文通用：子串 + 分词命中 + 字符 bigram Dice） ----------
+function normalize(s) {
+  return (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function charBigrams(s) {
+  const clean = (s || "").replace(/[\s，。、；：！？,.!?;:\[\]【】()（）'"“”‘’\-_/\\]+/g, "");
+  const set = {};
+  for (let i = 0; i < clean.length - 1; i++) set[clean.slice(i, i + 2)] = true;
+  return set;
+}
+
+function dice(a, b) {
+  const A = charBigrams(a), B = charBigrams(b);
+  let inter = 0;
+  for (const k in A) if (B[k]) inter++;
+  const union = Object.keys(A).length + Object.keys(B).length;
+  return union ? (2 * inter) / union : 0;
+}
+
+function stripPunct(s) {
+  return (s || "").toLowerCase().replace(/[\s，。、；：！？,.!?;:\[\]【】()（）'"“”‘’\-_/\\]+/g, "");
+}
+
+function lcsLen(a, b) {
+  const n = a.length, m = b.length;
+  let prev = new Array(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    const cur = new Array(m + 1).fill(0);
+    const ac = a[i - 1];
+    for (let j = 1; j <= m; j++) {
+      cur[j] = (ac === b[j - 1]) ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    }
+    prev = cur;
+  }
+  return prev[m];
+}
+
+function similarity(query, text) {
+  const q = normalize(query), t = normalize(text);
+  if (!q || !t) return 0;
+  let best = 0;
+  if (t.includes(q)) best = 1;
+  else if (q.includes(t)) best = 0.85;
+
+  const qc = stripPunct(q), tc = stripPunct(t);
+
+  // 字符覆盖率：查询中有多少字符出现在目标文本中（中文关键词匹配效果好）
+  let charCov = 0;
+  if (qc) {
+    const tset = new Set(tc);
+    let cov = 0;
+    for (const ch of qc) if (tset.has(ch)) cov++;
+    charCov = cov / qc.length;
+  }
+
+  // 最长公共子序列比率（对语序变化更鲁棒）
+  let lcsRatio = 0;
+  if (qc && tc) lcsRatio = lcsLen(qc, tc) / qc.length;
+
+  // 分词命中：连续字母/数字、或按空白/标点切分的中文短语
+  const tokens = q.split(/[\s，。、；：！？,.!?;:\[\]【】()（）'"“”‘’\-_/\\]+/).filter(x => x.length > 0);
+  let hit = 0, weight = 0;
+  for (const tok of tokens) {
+    const w = Math.min(1, tok.length / 4);
+    weight += w;
+    if (t.includes(tok)) hit += w;
+  }
+  const tokenScore = weight ? hit / weight : 0;
+
+  const d = dice(q, t);
+  const combined = 0.30 * charCov + 0.25 * lcsRatio + 0.25 * d + 0.20 * tokenScore;
+  return Math.min(1, Math.max(best, combined));
+}
+
+// ---------- 状态 ----------
+let headers = [];
+let rows = [];
+let records = [];
+let currentResults = [];
+let colKey = null, colSummary = null, colPriority = null;
+
+const $ = id => document.getElementById(id);
+const fileInput = $("fileInput");
+const loadStat = $("loadStat");
+const colKeySel = $("colKey");
+const colSummarySel = $("colSummary");
+const colPrioritySel = $("colPriority");
+
+function fillSelect(sel, selected) {
+  sel.innerHTML = "";
+  headers.forEach((h, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = (h || "(第 " + (i + 1) + " 列)") + "（列" + (i + 1) + "）";
+    if (i === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function findHeaderIndex(patterns, fallback) {
+  for (let i = 0; i < headers.length; i++) {
+    const h = (headers[i] || "").toLowerCase();
+    if (patterns.some(p => h.includes(p.toLowerCase()))) return i;
+  }
+  return fallback;
+}
+
+function rebuildRecords() {
+  colKey = parseInt(colKeySel.value, 10);
+  colSummary = parseInt(colSummarySel.value, 10);
+  colPriority = parseInt(colPrioritySel.value, 10);
+  records = rows.map(r => ({
+    keyword: (r[colKey] || "").trim(),
+    summary: (r[colSummary] || "").trim(),
+    priority: (r[colPriority] || "").trim()
+  }));
+}
+
+fileInput.addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      let text;
+      if (isExcel) {
+        if (typeof XLSX === "undefined") throw new Error("读取 Excel 需要联网加载 SheetJS，请检查网络后重试");
+        const wb = XLSX.read(reader.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        text = XLSX.utils.sheet_to_csv(ws);
+      } else {
+        text = String(reader.result);
+      }
+      const parsed = parseCSV(text);
+      if (parsed.length < 2) throw new Error("内容不足（至少需要表头 + 一行数据）");
+      headers = parsed[0].map(h => (h || "").trim());
+      rows = parsed.slice(1);
+      colKey = findHeaderIndex(["问题关键字", "关键字", "issue key", "key"], 0);
+      colSummary = findHeaderIndex(["概要", "摘要", "标题", "summary", "description", "描述"], 2);
+      colPriority = findHeaderIndex(["优先级", "priority"], 4);
+      fillSelect(colKeySel, colKey);
+      fillSelect(colSummarySel, colSummary);
+      fillSelect(colPrioritySel, colPriority);
+      rebuildRecords();
+      loadStat.innerHTML = "已加载 <b>" + records.length + "</b> 条 Bug，共 " + headers.length + " 列。关键字列：<b>" + (headers[colKey] || "?") + "</b>，概要列：<b>" + (headers[colSummary] || "?") + "</b>，优先级列：<b>" + (headers[colPriority] || "?") + "</b>";
+    } catch (err) {
+      loadStat.innerHTML = '<span style="color:#dc2626">解析失败：' + escapeHtml(err.message) + "</span>";
+      console.error(err);
+    }
+  };
+  if (isExcel) reader.readAsArrayBuffer(file);
+  else reader.readAsText(file, "UTF-8");
+});
+
+[colKeySel, colSummarySel, colPrioritySel].forEach(sel => sel.addEventListener("change", rebuildRecords));
+
+// ---------- 优先级着色 ----------
+function priorityClass(p) {
+  const v = (p || "").toLowerCase();
+  if (/严重|紧急|blocker|critical|p1|致命/.test(v)) return "p-critical";
+  if (/重要|高|high|major|p2/.test(v)) return "p-major";
+  if (/一般|中|中等|普通|normal|medium|p3/.test(v)) return "p-normal";
+  if (/低|轻微|次要|minor|low|p4/.test(v)) return "p-minor";
+  return "";
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+
+function jiraLink(key) {
+  let base = $("jiraBase").value.trim().replace(/\/+$/, "");
+  if (!base) return null;
+  return base + "/browse/" + encodeURIComponent(key);
+}
+
+// ---------- 搜索 ----------
+function analyze() {
+  const query = $("queryInput").value.trim();
+  const threshold = parseFloat($("threshold").value) || 0;
+  if (!query) { alert("请先输入问题简要描述"); return; }
+  if (!records.length) { alert("请先上传并加载 CSV 文件"); return; }
+
+  const scored = [];
+  for (const r of records) {
+    const haystack = (r.keyword + " " + r.summary);
+    const s = similarity(query, haystack);
+    if (s > 0) scored.push({ ...r, score: s });
+  }
+  scored.sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword));
+  const results = scored.filter(x => x.score >= threshold).slice(0, 200);
+
+  renderResults(results, query, threshold);
+}
+
+function renderResults(results, query, threshold) {
+  currentResults = results;
+  const tbody = document.querySelector("#resultTable tbody");
+  const stat = $("resultStat");
+  $("exportBtn").disabled = !results.length;
+  $("copyBtn").disabled = !results.length;
+  if (!results.length) {
+    stat.innerHTML = "共 0 条结果（阈值 " + threshold.toFixed(2) + "）";
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">未找到相似 Bug，可尝试降低匹配度阈值或缩短描述关键词。</td></tr>';
+    return;
+  }
+  stat.innerHTML = "显示 <b>" + results.length + "</b> 条（阈值 " + threshold.toFixed(2) + "）";
+  tbody.innerHTML = results.map(r => {
+    const link = jiraLink(r.keyword);
+    const keyHtml = link
+      ? '<a class="key" href="' + escapeHtml(link) + '" target="_blank" rel="noopener">' + escapeHtml(r.keyword) + "</a>"
+      : escapeHtml(r.keyword);
+    const pClass = priorityClass(r.priority);
+    const priHtml = r.priority ? '<span class="priority ' + pClass + '">' + escapeHtml(r.priority) + "</span>" : '<span class="muted">—</span>';
+    return "<tr><td>" + keyHtml + "</td><td>" + escapeHtml(r.summary) + "</td><td>" + priHtml + "</td><td class=\"score\">" + Math.round(r.score * 100) + "%</td></tr>";
+  }).join("");
+}
+
+$("analyzeBtn").addEventListener("click", analyze);
+$("queryInput").addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") analyze();
+});
+
+// ---------- 导出与复制 ----------
+function toCSVCell(v) {
+  v = (v == null ? "" : String(v));
+  if (/[",\n\r]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportResults() {
+  if (!currentResults.length) { alert("暂无结果可导出"); return; }
+  const header = ["问题关键字", "概要", "优先级", "匹配度"];
+  const lines = [header.map(toCSVCell).join(",")];
+  for (const r of currentResults) {
+    lines.push([r.keyword, r.summary, r.priority, Math.round(r.score * 100) + "%"].map(toCSVCell).join(","));
+  }
+  const csv = "\uFEFF" + lines.join("\r\n");
+  const now = new Date();
+  const stamp = now.toISOString().slice(0, 10) + "_" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0");
+  downloadText("相似Bug结果_" + stamp + ".csv", csv);
+}
+
+function copyKeys() {
+  if (!currentResults.length) { alert("暂无结果可复制"); return; }
+  const text = currentResults.map(r => r.keyword).join("\n");
+  const done = () => alert("已复制 " + currentResults.length + " 个关键字到剪贴板");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (e) {}
+  document.body.removeChild(ta);
+  done();
+}
+
+$("exportBtn").addEventListener("click", exportResults);
+$("copyBtn").addEventListener("click", copyKeys);
+</script>
+</body>
+</html>
