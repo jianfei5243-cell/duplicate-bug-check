@@ -1,2 +1,18 @@
-# duplicate-bug-check
-重复 Bug 查找工具：上传 Bug 表，模糊搜索相似 Bug
+# 重复 Bug 查找工具
+
+上传 Bug 单 CSV / Excel，输入问题描述，模糊搜索相似 Bug，并支持关键字跳转 Jira。
+
+## 功能
+- 上传 CSV 或 Excel（xlsx/xls），自动识别「问题关键字 / 概要 / 优先级」列
+- 输入问题描述，按相似度排序输出匹配 Bug
+- 关键字可点击跳转 Jira（顶部配置 Jira 基础地址）
+- 导出匹配结果为 CSV
+- 一键复制关键字列表
+- 纯前端，数据仅在本机浏览器处理，不上传服务器
+
+## 使用方法
+1. 打开本页面
+2. 顶部填写 Jira 基础地址（如 `https://your-company.atlassian.net`，留空则不生成链接）
+3. 上传 Bug 单 CSV/Excel
+4. 输入问题描述，点击「开始分析」
+5. 查看结果，可导出 CSV 或复制关键字
