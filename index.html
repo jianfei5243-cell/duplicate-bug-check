@@ -70,6 +70,8 @@
   }
   button:hover { background: var(--primary-dark); }
   button:disabled { background: #9ca3af; cursor: not-allowed; }
+  button.secondary { background: #e2e8f0; color: #1f2937; }
+  button.secondary:hover { background: #cbd5e1; }
   .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .muted { color: var(--muted); font-size: 12px; }
   .stat { font-size: 13px; color: var(--muted); }
@@ -149,6 +151,7 @@
     <div class="row" style="margin-bottom:10px;">
       <button id="exportBtn" disabled>导出结果 CSV</button>
       <button id="copyBtn" disabled>复制关键字列表</button>
+      <button id="clearBtn" class="secondary">清空结果</button>
     </div>
     <div style="overflow-x:auto;">
       <table id="resultTable">
@@ -490,6 +493,16 @@ function fallbackCopy(text, done) {
 
 $("exportBtn").addEventListener("click", exportResults);
 $("copyBtn").addEventListener("click", copyKeys);
+$("clearBtn").addEventListener("click", clearResults);
+
+function clearResults() {
+  currentResults = [];
+  const tbody = document.querySelector("#resultTable tbody");
+  tbody.innerHTML = '<tr><td colspan="4" class="empty">加载 CSV 并点击“开始分析”后，这里显示匹配结果。</td></tr>';
+  $("resultStat").innerHTML = "";
+  $("exportBtn").disabled = true;
+  $("copyBtn").disabled = true;
+}
 </script>
 </body>
 </html>
